@@ -30,11 +30,21 @@ fi
 DMG_PATH="dist/${DMG_NAME}.dmg"
 echo "==> Creating ${DMG_PATH}"
 rm -f "$DMG_PATH"
+
+# Stage the .app alongside a symlink to /Applications so the DMG shows the
+# familiar "drag the app into Applications" layout when the user opens it.
+STAGE="$(mktemp -d)/dmg-root"
+mkdir -p "$STAGE"
+cp -R "$APP_PATH" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+
 hdiutil create \
   -volname "$APP_NAME" \
-  -srcfolder "$APP_PATH" \
+  -srcfolder "$STAGE" \
   -ov \
   -format UDZO \
   "$DMG_PATH"
+
+rm -rf "$STAGE"
 
 echo "==> Done: $DMG_PATH"
