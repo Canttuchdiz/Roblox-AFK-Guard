@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Run tests
+        shell: bash
+        run: pytest tests/ -v
+
+  build-macos:
+    name: Build macOS .dmg
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build
+        run: bash scripts/build_macos.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RobloxAFKGuard-macos
+          path: dist/RobloxAFKGuard.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows .exe
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build
+        shell: cmd
+        run: scripts\build_windows.bat
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RobloxAFKGuard-windows
+          path: dist/RobloxAFKGuard.exe
+          if-no-files-found: error
+
+  release:
+    name: Attach artifacts to GitHub Release
+    needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RobloxAFKGuard-macos
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: RobloxAFKGuard-windows
+          path: dist
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/RobloxAFKGuard.dmg
+            dist/RobloxAFKGuard.exe
+          generate_release_notes: true
