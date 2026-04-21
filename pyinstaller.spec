@@ -25,8 +25,12 @@ if assets_dir.exists():
 
 hidden_imports = []
 if IS_MAC:
+    # pyobjc's Quartz is a namespace of C extensions; PyInstaller 6 sometimes
+    # misses the sub-bindings for CGWindowList* unless we name them explicitly.
     hidden_imports += [
         "Quartz",
+        "Quartz.CoreGraphics",
+        "objc",
     ]
 if IS_WIN:
     hidden_imports += [
@@ -34,10 +38,13 @@ if IS_WIN:
         "win32gui",
         "win32con",
         "win32process",
+        "win32api",
+        "win32ui",
     ]
 
-block_cipher = None
-
+# NOTE: PyInstaller 6.0 removed the `cipher` kwarg (bytecode obfuscation was
+# retired) and the `win_no_prefer_redirects` / `win_private_assemblies` flags.
+# Keep this spec compatible with PyInstaller >= 6.0 only.
 a = Analysis(
     [str(ROOT / "src" / "__main__.py")],
     pathex=[str(ROOT)],
@@ -47,36 +54,33 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries if IS_WIN else [],
-    a.zipfiles if IS_WIN else [],
-    a.datas if IS_WIN else [],
-    [],
-    name=EXE_NAME,
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=icon_path,
-    onefile=IS_WIN,
-)
-
+# PyInstaller 6 pattern:
+#   - onedir (macOS): EXE(..., exclude_binaries=True) → COLLECT(...) → BUNDLE(.app)
+#   - onefile (Windows): EXE(pyz, scripts, binaries, zipfiles, datas, ...) — no COLLECT.
+# Older specs that mixed both into one EXE() call and used `onefile=` kwarg stopped
+# working in PyInstaller 6.
 if IS_MAC:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=EXE_NAME,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=icon_path,
+    )
     coll = COLLECT(
         exe,
         a.binaries,
@@ -103,4 +107,25 @@ if IS_MAC:
                 "Roblox window to the front so it can be monitored."
             ),
         },
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name=EXE_NAME,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=icon_path,
     )
