@@ -31,10 +31,17 @@ class IgnoreRegionPainter(ttk.Frame):
         self._regions: list[Region] = list(initial_regions)
 
         self._frame_h, self._frame_w = frame.shape[:2]
+        # Clamp against the actual screen so we never request a canvas larger
+        # than the display — the label + buttons below the canvas eat vertical
+        # space, so budget generously for them (~220 px) and for the title bar.
+        screen_w = master.winfo_screenwidth()
+        screen_h = master.winfo_screenheight()
+        max_w = min(self.MAX_CANVAS_WIDTH, max(400, screen_w - 80))
+        max_h = min(self.MAX_CANVAS_HEIGHT, max(300, screen_h - 220))
         self._scale = min(
             1.0,
-            self.MAX_CANVAS_WIDTH / self._frame_w,
-            self.MAX_CANVAS_HEIGHT / self._frame_h,
+            max_w / self._frame_w,
+            max_h / self._frame_h,
         )
         disp_w = int(self._frame_w * self._scale)
         disp_h = int(self._frame_h * self._scale)

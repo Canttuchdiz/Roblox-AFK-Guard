@@ -12,7 +12,7 @@ from src.gui.killed import KilledBanner
 from src.gui.painter import IgnoreRegionPainter, Region
 from src.gui.picker import WindowPickerFrame
 from src.logic.detector import Detector, build_ignore_mask
-from src.logic.guard_loop import GuardLoop
+from src.logic.guard_loop import GuardLoop, TripInfo
 from src.utils import config
 from src.utils.screenshots import save_trip_frame
 from src.utils.windows import capture_window, focus_window, leave_game, prevent_afk
@@ -56,6 +56,12 @@ class AppController:
             self._current.destroy()
         self._current = widget
         widget.pack(fill="both", expand=True)
+        # Clear any pinned geometry so the window auto-sizes to the new
+        # screen's requested width/height. Each screen (picker, painter,
+        # calibrator) needs a different size; without this the first
+        # geometry() call in __init__ clamps every subsequent screen.
+        self.root.update_idletasks()
+        self.root.geometry("")
 
     def _show_picker(self) -> None:
         self._swap(WindowPickerFrame(self.root, on_start=self._on_window_picked))
@@ -116,7 +122,6 @@ class AppController:
         detector = Detector(threshold=threshold, mask=mask)
 
         self.root.attributes("-topmost", True)
-        self.root.geometry("360x320")
 
         # Slider range: 0 → 5% of the frame. Well past any realistic trip
         # threshold so the user can detune aggressively if needed.
@@ -135,6 +140,9 @@ class AppController:
             on_threshold_change=_set_threshold,
         )
         self._swap(guard_ui)
+        # Pin the guard screen to a small always-on-top status size. Must be
+        # AFTER _swap, which resets geometry to auto-fit the new widget.
+        self.root.geometry("360x320")
 
         loop = GuardLoop(
             root=self.root,
@@ -168,11 +176,16 @@ class AppController:
         self._loop.start()
         self._schedule_anti_afk()
 
-    def _on_trip(self, frame: np.ndarray) -> None:
-        """Save the offending frame, then run Roblox's leave-game flow."""
+    def _on_trip(self, info: TripInfo) -> None:
+        """Save the offending frame + debug overlay, then run leave-game."""
         assert self._window is not None
         try:
-            save_trip_frame(frame)
+            save_trip_frame(
+                info.frame,
+                moved=info.moved,
+                diff=info.diff,
+                threshold=info.threshold,
+            )
         except Exception as exc:
             # Screenshotting must never block leave_game — that's the whole point.
             print(f"[trip] failed to save screenshot: {exc}")

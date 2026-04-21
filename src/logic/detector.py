@@ -27,22 +27,29 @@ def build_ignore_mask(height: int, width: int, regions: list[Region]) -> np.ndar
     return mask
 
 
-def frame_diff(prev: np.ndarray, curr: np.ndarray, mask: np.ndarray) -> float:
-    """Return the count of unmasked pixels that changed meaningfully between frames.
+def frame_diff_mask(prev: np.ndarray, curr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Return a bool mask the same shape as the frame's HxW marking which
+    unmasked pixels changed meaningfully between `prev` and `curr`.
 
     A pixel counts as "moved" when the sum of absolute per-channel deltas
-    exceeds PIXEL_CHANGE_DELTA. We return a count (not a mean) so that a
-    localized event — e.g. a player spawning in, covering a few thousand
-    pixels in a 2M-pixel window — is not diluted to near zero by averaging
-    across the whole frame.
+    exceeds PIXEL_CHANGE_DELTA. Kept separate from `frame_diff` so the trip
+    screenshot can be annotated with the exact region that triggered.
     """
     if prev.shape != curr.shape:
         raise ValueError(f"shape mismatch: {prev.shape} vs {curr.shape}")
     if mask.shape != prev.shape[:2]:
         raise ValueError(f"mask shape {mask.shape} != frame HxW {prev.shape[:2]}")
     delta = np.abs(curr.astype(np.int16) - prev.astype(np.int16)).sum(axis=2)
-    moved = (delta > PIXEL_CHANGE_DELTA) & (mask > 0)
-    return float(moved.sum())
+    return (delta > PIXEL_CHANGE_DELTA) & (mask > 0)
+
+
+def frame_diff(prev: np.ndarray, curr: np.ndarray, mask: np.ndarray) -> float:
+    """Count of unmasked pixels that changed meaningfully between frames.
+
+    A localized event (e.g. a player spawning) is not diluted to near zero by
+    averaging across the whole frame — we return a pixel count, not a mean.
+    """
+    return float(frame_diff_mask(prev, curr, mask).sum())
 
 
 @dataclass
@@ -50,14 +57,23 @@ class Detector:
     threshold: float
     mask: np.ndarray
     _prev: np.ndarray | None = None
+    _last_moved: np.ndarray | None = None  # bool HxW mask from the most recent step
+
+    @property
+    def last_moved(self) -> np.ndarray | None:
+        """The moved-pixel mask from the most recent step(), for debug overlays."""
+        return self._last_moved
 
     def step(self, frame: np.ndarray) -> tuple[float, bool]:
         """Feed a new frame. Returns (diff, tripped). First call always returns (0.0, False)."""
         if self._prev is None or self._prev.shape != frame.shape:
             self._prev = frame
+            self._last_moved = None
             return 0.0, False
-        diff = frame_diff(self._prev, frame, self.mask)
+        moved = frame_diff_mask(self._prev, frame, self.mask)
+        self._last_moved = moved
         self._prev = frame
+        diff = float(moved.sum())
         return diff, diff > self.threshold
 
     def reset_baseline(self) -> None:

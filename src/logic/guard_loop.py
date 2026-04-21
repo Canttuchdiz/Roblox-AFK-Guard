@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Callable, Protocol
+
+import numpy as np
 
 from .detector import Detector
+
+
+@dataclass(frozen=True)
+class TripInfo:
+    """Everything the trip handler needs to explain what happened.
+
+    Bundled into a dataclass so we can add fields (timestamp, region label,
+    etc.) without another round of callback-signature churn.
+    """
+    frame: np.ndarray          # the post-motion RGB frame that tripped
+    moved: np.ndarray          # bool HxW mask: True where pixels counted as moved
+    diff: float                # count of moved pixels
+    threshold: float           # the threshold the diff exceeded
 
 
 TICK_MS = 250
@@ -22,7 +37,7 @@ class GuardLoop:
     detector: Detector
     capture_fn: Callable[[], "object"]  # returns np.ndarray frame
     on_tick: Callable[[float, float], None]  # (diff, threshold)
-    on_trip: Callable[[Any], None]  # receives the frame (np.ndarray) that tripped
+    on_trip: Callable[[TripInfo], None]
 
     _job: str | None = None
     _running: bool = False
@@ -55,6 +70,16 @@ class GuardLoop:
         self.on_tick(diff, self.detector.threshold)
         if tripped:
             self._running = False
-            self.on_trip(frame)
+            # last_moved is guaranteed non-None after a successful diff tick;
+            # fall back to an all-False mask just so the callback never NPEs.
+            moved = self.detector.last_moved
+            if moved is None:
+                moved = np.zeros(frame.shape[:2], dtype=bool)
+            self.on_trip(TripInfo(
+                frame=frame,
+                moved=moved,
+                diff=diff,
+                threshold=self.detector.threshold,
+            ))
             return
         self._schedule()
