@@ -41,8 +41,61 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # Import the Developer ID Application cert into a throwaway keychain
+      # so codesign can find it. The keychain dies with the runner, so no
+      # cleanup is needed. If the P12 secret is missing we skip — the build
+      # script will then produce an unsigned DMG (useful for test builds
+      # from forks, where secrets aren't exposed).
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12_BASE64" ]; then
+            echo "No MACOS_CERT_P12_BASE64 secret — will build unsigned."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+
+          # Add our keychain to the search list so `security find-identity`
+          # in the build script actually sees the cert we just imported.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed 's/"//g')
+
+          # Without this, codesign prompts interactively for the private
+          # key each time — which hangs the runner. This grants codesign
+          # unattended access to the key.
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          rm -f "$CERT_PATH"
+
+          echo "Available signing identities:"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Build
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: bash scripts/build_macos.sh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

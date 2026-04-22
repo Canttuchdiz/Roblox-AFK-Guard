@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Entitlements for the signed .app under macOS Hardened Runtime.
+
+    Why each one is here (removing any of these will crash a notarized build):
+
+    - allow-jit / allow-unsigned-executable-memory:
+        PyInstaller's bootloader extracts and maps Python extension modules
+        into executable memory at launch. Without these the bundle segfaults
+        on first run under Hardened Runtime.
+
+    - disable-library-validation:
+        PyInstaller bundles numerous .dylib / .so files (NumPy, Pillow,
+        pyobjc's C extensions). They're signed with our team ID by the
+        deep-sign pass, but some dynamically dlopen() siblings and
+        library validation sees that as a mismatch; refused loads
+        manifest as silent launch failures unless disabled.
+
+    - automation.apple-events:
+        We drive Roblox via `osascript` → System Events to bring the window
+        to the front, synthesize the leave-game key sequence, and hold S
+        for anti-AFK. macOS gates this behind the Automation permission;
+        the entitlement is what makes the prompt appear instead of silently
+        failing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>
