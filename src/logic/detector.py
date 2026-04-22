@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 import numpy as np
+from PIL import Image
 
 
 Region = tuple[int, int, int, int]  # x, y, w, h in window-local coords
@@ -12,6 +14,19 @@ Region = tuple[int, int, int, int]  # x, y, w, h in window-local coords
 # well above JPEG / video compression noise but low enough that a new sprite
 # dropping in still lights up every pixel it covers.
 PIXEL_CHANGE_DELTA = 30
+
+
+def resize_mask(mask: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
+    """Rescale a uint8 ignore mask to a new (height, width) with nearest-neighbor.
+
+    Used when the captured window resolution changes mid-session (HiDPI flip,
+    user resized Roblox, switched monitors). Preserves the binary 0/1 values.
+    """
+    h, w = target_hw
+    if mask.shape == (h, w):
+        return mask
+    pil = Image.fromarray((mask * 255).astype(np.uint8)).resize((w, h), Image.NEAREST)
+    return (np.array(pil) > 0).astype(np.uint8)
 
 
 def build_ignore_mask(height: int, width: int, regions: list[Region]) -> np.ndarray:
@@ -66,6 +81,20 @@ class Detector:
 
     def step(self, frame: np.ndarray) -> tuple[float, bool]:
         """Feed a new frame. Returns (diff, tripped). First call always returns (0.0, False)."""
+        # Window can change resolution under us (HiDPI scaling flip, resize,
+        # move to a different display). Rescale the mask to match rather
+        # than crash — painted regions roughly follow the window size.
+        if self.mask.shape != frame.shape[:2]:
+            print(
+                f"[detector] frame resized {self.mask.shape} -> {frame.shape[:2]}; "
+                "rescaling ignore mask",
+                file=sys.stderr,
+            )
+            self.mask = resize_mask(self.mask, frame.shape[:2])
+            # Prev is also stale at the old resolution — start over.
+            self._prev = frame
+            self._last_moved = None
+            return 0.0, False
         if self._prev is None or self._prev.shape != frame.shape:
             self._prev = frame
             self._last_moved = None
