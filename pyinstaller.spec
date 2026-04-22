@@ -12,10 +12,16 @@ IS_WIN = sys.platform == "win32"
 APP_NAME = "Roblox AFK Guard"
 EXE_NAME = "RobloxAFKGuard"
 
+# On macOS Tahoe we don't pass an icon to PyInstaller at all — the Liquid
+# Glass icon lives in an asset catalog (Assets.car) that scripts/build_macos.sh
+# compiles from assets/icon.icon with `actool` and drops into the .app's
+# Resources directory *after* PyInstaller finishes. The BUNDLE() call below
+# sets CFBundleIconName = AppIcon so macOS knows to look there.
+#
+# Windows still uses a plain .ico embedded in the .exe resource section;
+# PyInstaller handles that via icon= if the file is present.
 icon_path = None
-if IS_MAC and (ROOT / "assets" / "icon.icns").exists():
-    icon_path = str(ROOT / "assets" / "icon.icns")
-elif IS_WIN and (ROOT / "assets" / "icon.ico").exists():
+if IS_WIN and (ROOT / "assets" / "icon.ico").exists():
     icon_path = str(ROOT / "assets" / "icon.ico")
 
 datas = []
@@ -94,7 +100,9 @@ if IS_MAC:
     app = BUNDLE(
         coll,
         name=f"{APP_NAME}.app",
-        icon=icon_path,
+        # icon= intentionally omitted — Liquid Glass icon comes from the
+        # Assets.car that build_macos.sh builds from assets/icon.icon and
+        # copies into Contents/Resources/ after this BUNDLE() runs.
         bundle_identifier="com.hgoldrich.robloxafkguard",
         info_plist={
             "CFBundleName": APP_NAME,
@@ -102,6 +110,14 @@ if IS_MAC:
             "CFBundleShortVersionString": "0.1.0",
             "CFBundleVersion": "0.1.0",
             "NSHighResolutionCapable": True,
+            # Pairs with the --app-icon flag passed to actool in build_macos.sh.
+            # If this key is missing, Tahoe falls back to the generic gray app
+            # square regardless of whether Assets.car is present.
+            "CFBundleIconName": "AppIcon",
+            # Tahoe-only. Below this version the .icon asset catalog isn't
+            # honored, so setting the minimum avoids the app "working" on
+            # older macOS but looking broken (no icon at all).
+            "LSMinimumSystemVersion": "26.0",
             "NSAppleEventsUsageDescription": (
                 "Roblox AFK Guard uses Apple Events to bring the selected "
                 "Roblox window to the front so it can be monitored."

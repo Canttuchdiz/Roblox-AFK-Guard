@@ -36,6 +36,46 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Compile the Liquid Glass icon (Tahoe) into Assets.car and drop it into the
+# bundle. PyInstaller has no concept of asset catalogs, so we do it ourselves.
+# Must run BEFORE codesign — the signature has to cover Assets.car.
+# -----------------------------------------------------------------------------
+ICON_SOURCE="$here/assets/icon.icon"
+if [[ -d "$ICON_SOURCE" ]]; then
+  echo "==> Compiling Liquid Glass icon ($ICON_SOURCE)"
+
+  # actool wants a directory to drop Assets.car into, plus a throwaway plist
+  # fragment that we don't care about (our Info.plist already has the right
+  # keys via pyinstaller.spec).
+  ACTOOL_OUT="$(mktemp -d)"
+
+  # --app-icon AppIcon names the asset so CFBundleIconName = AppIcon in the
+  #   Info.plist can find it. Must match the value in pyinstaller.spec.
+  # --minimum-deployment-target 26.0 + --platform macosx is what flips actool
+  #   into "produce a Liquid Glass asset" mode; without 26.0 it emits a
+  #   legacy catalog that Tahoe's Dock ignores.
+  xcrun actool "$ICON_SOURCE" \
+    --compile "$ACTOOL_OUT" \
+    --app-icon AppIcon \
+    --enable-on-demand-resources NO \
+    --minimum-deployment-target 26.0 \
+    --platform macosx \
+    --output-partial-info-plist /dev/null
+
+  if [[ ! -f "$ACTOOL_OUT/Assets.car" ]]; then
+    echo "!! actool ran but produced no Assets.car — icon build is broken." >&2
+    ls -la "$ACTOOL_OUT" >&2 || true
+    exit 1
+  fi
+
+  cp "$ACTOOL_OUT/Assets.car" "$APP_PATH/Contents/Resources/Assets.car"
+  rm -rf "$ACTOOL_OUT"
+  echo "    embedded: $APP_PATH/Contents/Resources/Assets.car"
+else
+  echo "==> No assets/icon.icon found — app will launch with the generic icon."
+fi
+
+# -----------------------------------------------------------------------------
 # Sign + notarize (CI / release builds). Gated so local dev builds skip cleanly.
 # -----------------------------------------------------------------------------
 # We auto-detect the identity from the keychain rather than hardcoding the
